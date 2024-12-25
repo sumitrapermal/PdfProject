@@ -1,0 +1,77 @@
+import gradio as gr
+from PyPDF2 import PdfReader
+from gtts import gTTS
+import os
+import speech_recognition as sr
+import tempfile
+import numpy as np
+from pydub import AudioSegment
+
+def process_pdf_and_voice(pdf_file, voice_message):
+    try:
+        # Extract text from the PDF file
+        pdf_reader = PdfReader(pdf_file.name)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+
+        # Check if the text was extracted successfully
+        if not text.strip():
+            return "Could not extract text from the PDF. Please try another file.", ""
+
+        # Save the voice message to a temporary file
+        temp_dir = tempfile.gettempdir()
+        temp_audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        sound = AudioSegment(
+            data=voice_message.tobytes(),
+            frame_rate=44100,
+            sample_width=2,
+            channels=1,
+        )
+        sound.export(temp_audio_file.name, format="wav")
+
+        # Transcribe the voice message to text
+        r = sr.Recognizer()
+        with sr.AudioFile(temp_audio_file.name) as source:
+            audio = r.record(source)
+        query = r.recognize_google(audio)
+
+        # Process the user's query and extract the relevant information from the text
+        answer = ""
+        for line in text.splitlines():
+            if query.lower() in line.lower():
+                answer = line
+                break
+
+        # Clean up temporary audio file
+        os.remove(temp_audio_file.name)
+
+        # Check if an answer was found
+        if not answer:
+            return "No answer found for the given query.", ""
+
+        # Convert the answer to a voice message using gTTS
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as response_audio:
+            tts = gTTS(text=answer, lang='en')
+            tts.save(response_audio.name)
+            return answer, gr.Audio(response_audio.name)
+
+    except Exception as e:
+        return f"An error occurred: {str(e)}", ""
+
+# Gradio interface
+demo = gr.Interface(
+    fn=process_pdf_and_voice,
+    inputs=[
+        gr.File(label="Upload PDF File"),
+        gr.Audio(label="Record Voice Message", type="numpy")
+    ],
+    outputs=[
+        gr.Textbox(label="Answer"),
+        gr.Audio(label="Voice Response")
+    ],
+    title="Query Solution Generator",
+    description="Upload a PDF file and record a voice message to get a text and voice response with the answer to your query."
+)
+
+demo.launch()
